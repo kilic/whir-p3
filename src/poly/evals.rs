@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 use p3_field::{ExtensionField, Field};
 #[cfg(feature = "parallel")]
@@ -226,6 +226,12 @@ impl<F> Deref for EvaluationsList<F> {
 
     fn deref(&self) -> &Self::Target {
         &self.evals
+    }
+}
+
+impl<F> DerefMut for EvaluationsList<F> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.evals
     }
 }
 

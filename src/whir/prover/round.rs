@@ -392,10 +392,9 @@ mod tests {
 
         // Add a single equality constraint to the statement: f(1,1,1) = expected value
         let mut statement = Statement::<EF4>::new(num_variables);
-        statement.add_constraint(
-            Weights::evaluation(MultilinearPoint(vec![EF4::ONE, EF4::ONE, EF4::ONE])),
-            f(EF4::ONE, EF4::ONE, EF4::ONE),
-        );
+        let point = MultilinearPoint(vec![EF4::ONE, EF4::ONE, EF4::ONE]);
+        let eval = poly.evaluate(&point.reversed());
+        statement.add_constraint(Weights::evaluation(point), eval);
 
         // Set up the domain separator, prover state, and witness for this configuration
         let (_, mut prover_state, witness) = setup_domain_and_commitment(&config, poly);
@@ -411,7 +410,7 @@ mod tests {
 
         // Extract the constructed sumcheck prover and folding randomness
         let sumcheck = &state.sumcheck_prover;
-        let sumcheck_randomness = state.folding_randomness.clone();
+        let sumcheck_randomness = &state.folding_randomness;
 
         // With a folding factor of 3, all variables are collapsed in 1 round, so we expect only 1 evaluation left
         assert_eq!(sumcheck.evals.len(), 1);
@@ -419,9 +418,9 @@ mod tests {
         // The value of f at the folding point should match the evaluation
         let eval_at_point = sumcheck.evals[0];
         let expected = f(
-            sumcheck_randomness[0],
-            sumcheck_randomness[1],
             sumcheck_randomness[2],
+            sumcheck_randomness[1],
+            sumcheck_randomness[0],
         );
         assert_eq!(eval_at_point, expected);
 
@@ -429,7 +428,7 @@ mod tests {
         let dot_product: EF4 = sumcheck
             .evals
             .iter()
-            .zip(sumcheck.weights.evals())
+            .zip(sumcheck.weights.iter())
             .map(|(f, w)| *f * *w)
             .sum();
         assert_eq!(dot_product, sumcheck.sum);
@@ -601,13 +600,13 @@ mod tests {
         let evals_f = &sumcheck.evals;
         assert_eq!(
             evals_f.evaluate(&MultilinearPoint(vec![
-                EF4::from_u64(32636),
-                EF4::from_u64(9876)
+                EF4::from_u64(9876),
+                EF4::from_u64(32636)
             ])),
             f(
-                EF4::from_u64(32636),
+                sumcheck_randomness[0],
                 EF4::from_u64(9876),
-                sumcheck_randomness[0]
+                EF4::from_u64(32636),
             )
         );
 

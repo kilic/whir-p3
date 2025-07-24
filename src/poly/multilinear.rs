@@ -33,6 +33,13 @@ where
         self.len()
     }
 
+    /// Returns point in reversed variable order
+    #[inline]
+    #[must_use]
+    pub fn reversed(&self) -> Self {
+        Self(self.0.iter().rev().copied().collect())
+    }
+
     /// Converts a `BinaryHypercubePoint` (bit representation) into a `MultilinearPoint`.
     ///
     /// This maps each bit in the binary integer to `F::ONE` (1) or `F::ZERO` (0) in the field.

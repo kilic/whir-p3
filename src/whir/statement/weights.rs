@@ -140,7 +140,7 @@ impl<F: Field> Weights<F> {
         assert_eq!(accumulator.num_variables(), self.num_variables());
         match self {
             Self::Evaluation { point } => {
-                eval_eq::<Base, F, INITIALIZED>(point, accumulator.evals_mut(), factor);
+                eval_eq::<Base, F, INITIALIZED>(&point.reversed(), accumulator.evals_mut(), factor);
             }
             Self::Linear { weight } => {
                 #[cfg(feature = "parallel")]

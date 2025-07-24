@@ -95,7 +95,9 @@ where
             prover_state,
             self.committment_ood_samples,
             self.mv_parameters.num_variables,
-            |point| info_span!("ood evaluation").in_scope(|| polynomial.evaluate(point)),
+            |point| {
+                info_span!("ood evaluation").in_scope(|| polynomial.evaluate(&point.reversed()))
+            },
         );
 
         // Return the witness containing the polynomial, Merkle tree, and OOD results.

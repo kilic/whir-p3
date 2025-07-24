@@ -112,7 +112,7 @@ where
         let point = MultilinearPoint::expand_from_univariate(prover.sample(), num_vars);
 
         // Evaluate the polynomial at this point.
-        let eval = poly.evaluate(&point);
+        let eval = poly.evaluate(&point.reversed());
 
         // Record the evaluation in the transcript for Fiat-Shamir soundness.
         prover.add_extension_scalar(eval);
@@ -125,7 +125,7 @@ where
     statement
 }
 
-/// Constructs an intermediate `Statement` from the current `sumcheck` polynomial,
+/// Adds intermediate statements to the current `sumcheck` polynomial,
 /// and registers a new equality constraint with random linear combination weights.
 ///
 /// This function is used between sumcheck rounds to:
@@ -140,44 +140,28 @@ where
 /// - `prover`: The mutable `ProverState` used for Fiat-Shamir sampling and logging commitments.
 /// - `num_points`: Number of evaluation points to sample and constrain.
 /// - `sumcheck`: The current `SumcheckSingle` object representing the prover's polynomial state.
-///
-/// # Returns
-/// A tuple `(statement, alpha)`:
-/// - `statement`: The new `Statement<EF>` containing point-wise evaluation constraints.
-/// - `alpha`: The random scalar used to linearly combine those constraints.
-fn make_inter_statement<Challenger>(
+fn add_inter_statement<Challenger>(
     prover: &mut ProverState<F, EF, Challenger>,
     num_points: usize,
     sumcheck: &mut SumcheckSingle<F, EF>,
-) -> (Statement<EF>, EF)
-where
+) where
     Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
 {
-    // Determine how many variables are left in the current sumcheck polynomial.
-    let num_vars = sumcheck.num_variables();
-
-    // Create a new empty statement of that arity (for evaluation constraints).
-    let mut statement = Statement::new(num_vars);
-
     // - Sample `num_points` univariate challenge points.
     // - Evaluate the sumcheck polynomial on them.
     // - Collect (point, eval) pairs for use in the statement and constraint aggregation.
     let (points, evals): (Vec<_>, Vec<_>) = (0..num_points)
         .map(|_| {
-            // Sample a univariate field element from the prover's challenger.
-            let point = prover.sample();
-
-            // Expand it into a `num_vars`-dimensional multilinear point.
-            let point = MultilinearPoint::expand_from_univariate(point, num_vars);
+            // Sample a univariate field element from the prover's challenger
+            // And expand it into a `num_vars`-dimensional multilinear point.
+            let point =
+                MultilinearPoint::expand_from_univariate(prover.sample(), sumcheck.num_variables());
 
             // Evaluate the current sumcheck polynomial at the sampled point.
-            let eval = sumcheck.evals.evaluate(&point);
+            let eval = sumcheck.evals.evaluate(&point.reversed());
 
             // Add the evaluation result to the transcript for Fiat-Shamir soundness.
             prover.add_extension_scalar(eval);
-
-            // Add the evaluation constraint: poly(point) == eval.
-            statement.add_constraint(Weights::evaluation(point.clone()), eval);
 
             // Return the sampled point and its evaluation.
             (point, eval)
@@ -191,14 +175,11 @@ where
     //
     // This enforces that the weighted sum of these evaluations equals the claimed value.
     sumcheck.add_new_equality(&points, &evals, &alpha.powers().take(num_points).collect());
-
-    // Return the constructed statement and the alpha used for linear combination.
-    (statement, alpha)
 }
 
 /// Reconstructs a `Statement` from the verifier's transcript using Fiat-Shamir sampling.
 ///
-/// This function performs the verifier-side equivalent of `make_initial_statement` or `make_inter_statement`.
+/// This function performs the verifier-side equivalent of `make_initial_statement` or `add_inter_statement`.
 /// It:
 /// 1. Samples `num_points` univariate challenge points.
 /// 2. Expands them to `num_vars`-dimensional multilinear points.
@@ -373,7 +354,7 @@ fn run_sumcheck_test(folding_factors: &[usize], num_points: &[usize]) {
         .zip(num_points.iter().skip(1))
     {
         // Add additional equality constraints for intermediate rounds
-        make_inter_statement(prover, num_points, &mut sumcheck);
+        add_inter_statement(prover, num_points, &mut sumcheck);
 
         // Compute and apply the next folding round
         prover_randomness.extend(&sumcheck.compute_sumcheck_polynomials(
@@ -399,7 +380,10 @@ fn run_sumcheck_test(folding_factors: &[usize], num_points: &[usize]) {
 
     // Final folded value must match f(r)
     let final_folded_value = sumcheck.evals[0];
-    assert_eq!(poly.evaluate(&prover_randomness), final_folded_value);
+    assert_eq!(
+        poly.evaluate(&prover_randomness.reversed()),
+        final_folded_value
+    );
     prover.add_extension_scalar(final_folded_value);
 
     // Save proof data to pass to verifier
@@ -437,10 +421,9 @@ fn run_sumcheck_test(folding_factors: &[usize], num_points: &[usize]) {
 
     // Check reconstructed constraints match original ones
     for (expected, actual) in constraints
-        .clone()
         .iter()
         .flatten()
-        .zip(statement.constraints.clone().iter())
+        .zip(statement.constraints.iter())
     {
         assert_eq!(expected, actual);
     }
@@ -532,7 +515,7 @@ fn run_sumcheck_test_skips(folding_factors: &[usize], num_points: &[usize]) {
         .zip(num_points.iter().skip(1))
     {
         // Sample new evaluation constraints and combine them into the sumcheck state
-        make_inter_statement(prover, num_pts, &mut sumcheck);
+        add_inter_statement(prover, num_pts, &mut sumcheck);
 
         // Fold the sumcheck polynomial again and extend randomness vector
         prover_randomness.extend(&sumcheck.compute_sumcheck_polynomials(prover, folding, 0));
