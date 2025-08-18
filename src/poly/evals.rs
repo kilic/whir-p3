@@ -266,16 +266,96 @@ where
 mod tests {
     use std::time::Instant;
 
+    use itertools::Itertools;
     use p3_baby_bear::BabyBear;
     use p3_field::{PrimeCharacteristicRing, PrimeField64, extension::BinomialExtensionField};
     use proptest::prelude::*;
     use rand::{Rng, SeedableRng, rngs::StdRng};
+    use tracing_forest::{ForestLayer, util::LevelFilter};
+    use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
 
     use super::*;
     use crate::poly::{coeffs::CoefficientList, hypercube::BinaryHypercube};
 
     type F = BabyBear;
     type EF4 = BinomialExtensionField<F, 4>;
+
+    fn eval_multilinear_alternative<F, EF>(evals: &[F], point: &[EF]) -> EF
+    where
+        F: Field,
+        EF: ExtensionField<F>,
+    {
+        fn eq<F: Field>(point: &[F]) -> Vec<F> {
+            let k = point.len();
+            let mut eq = unsafe { uninitialized_vec(1 << k) };
+            eq[0] = F::ONE;
+            for (i, &zi) in point.iter().enumerate() {
+                let (lo, hi) = eq.split_at_mut(1 << i);
+                lo.par_iter_mut()
+                    .zip(hi.par_iter_mut())
+                    .for_each(|(a0, a1)| {
+                        *a1 = *a0 * zi;
+                        *a0 -= *a1;
+                    });
+            }
+            eq
+        }
+
+        let mut point = point.to_vec();
+        point.reverse();
+
+        debug_assert_eq!(evals.len(), 1 << point.len());
+
+        let mid = point.len() / 2;
+        let (z0, z1) = point.split_at(mid);
+
+        // let mut left = unsafe { uninitialized_vec(1 << z0.len()) };
+        // let mut right = unsafe { uninitialized_vec(1 << z1.len()) };
+        // let mut z0 = z0.to_vec();
+        // z0.reverse();
+        // eval_eq::<_, _, false>(&z0, &mut left, EF::ONE);
+        // let mut z1 = z1.to_vec();
+        // z1.reverse();
+        // eval_eq::<_, _, false>(&z1, &mut right, EF::ONE);
+
+        let left = eq(z0);
+        let right = eq(z1);
+
+        evals
+            .par_chunks(left.len())
+            .zip_eq(right.par_iter())
+            .map(|(part, &c)| {
+                part.iter()
+                    .zip_eq(left.iter())
+                    .map(|(&a, &b)| b * a)
+                    .sum::<EF>()
+                    * c
+            })
+            .sum()
+    }
+
+    #[test]
+    fn bench_eval() {
+        let env_filter = EnvFilter::builder()
+            .with_default_directive(LevelFilter::INFO.into())
+            .from_env_lossy();
+
+        Registry::default()
+            .with(env_filter)
+            .with(ForestLayer::default())
+            .init();
+
+        let mut rng = StdRng::seed_from_u64(0);
+        let k = 25;
+        let evals =
+            EvaluationsList::<F>::new((0..1 << k).map(|_| F::from_u64(rng.random())).collect());
+        let point: Vec<EF4> = (0..k).map(|_| rng.random()).collect::<Vec<_>>();
+        let point = MultilinearPoint(point);
+        let e0 = tracing::info_span!("eval").in_scope(|| evals.evaluate(&point));
+        let e1 = tracing::info_span!("eval alternative")
+            .in_scope(|| eval_multilinear_alternative(&evals, &point));
+        assert_eq!(e0, e1);
+    }
 
     #[test]
     #[allow(clippy::redundant_clone)]
